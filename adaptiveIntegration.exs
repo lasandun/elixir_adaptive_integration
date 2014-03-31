@@ -1,6 +1,22 @@
+# This file contains adaptive integration using simpson method. The integration supports parallel processing.
+# The integration method (simpson) runs on clusters. The adaptive method do 3 integrations in one step. Those 3 will
+# aslo be done in 3 processes.
+# The integrating function ( f(x) ) isn't given by a ruby program yet. Hardcoded in this file.
+# The number of processes the program is generating is controlled. (not completed) 
+# The available processor core quantity is calculated at the start of the program. These are system calls and 
+# the occurances should be reduced as they will be time consuming.
+# Currently this method is creating (processorCores x 3) processes at each step. It's better to control it to level of
+# available processor cores.
+
 defmodule AdaptiveIntegration do
 
-    #calls an integration method. Currently it's supporting only simpson method
+    # the API to the user
+    def adaptiveIntegration(a, b, n, tolerance, remainingIterations) do
+        noOfProcesses = :erlang.system_info(:logical_processors_available) # get the number of usable processor cores
+        adaptive(a, b, n, tolerance, remainingIterations, noOfProcesses)
+    end
+
+    # This calls one of integration methods. Curretly only simpson method is available
     def integrationMethod(pid, part, a, b, n, noOfProcesses) do 
         ret = Simpson.simpsonParallel(a, b, n, 4)
         if(part == 1) do
@@ -14,20 +30,17 @@ defmodule AdaptiveIntegration do
         end
     end
 
-    def adaptive(a, b, n, tolerance, remainingIterations) do    # adaptive routine
-
+    def adaptive(a, b, n, tolerance, remainingIterations, noOfProcesses) do    # adaptive routine
         IO.puts "remainingIterations = #{remainingIterations}"
-
         if(remainingIterations == 0) do
             IO.puts "Maximum iteration provided was not enough!"
         end
 
-        noOfProcesses = :erlang.system_info(:logical_processors_available)
         c = (a + b) / 2
 
         #find integrals in (a,c) , (c, b) and (a, b)
-        spawn(AdaptiveIntegration, :integrationMethod, [self, 1, a, c, n, noOfProcesses])
-        spawn(AdaptiveIntegration, :integrationMethod, [self, 2, c, b, n, noOfProcesses])
+        spawn(AdaptiveIntegration, :integrationMethod, [self, 1, a, c, n/2, noOfProcesses])
+        spawn(AdaptiveIntegration, :integrationMethod, [self, 2, c, b, n/2, noOfProcesses])
         spawn(AdaptiveIntegration, :integrationMethod, [self, 3, a, b, n, noOfProcesses])
 
         #receive results
@@ -58,12 +71,13 @@ defmodule AdaptiveIntegration do
         if(err < tolerance) do
             (lhs[:result] + rhs[:result])
         else
-            adaptive(a,c,n,tolerance,remainingIterations-1)+adaptive(c,b,n,tolerance,remainingIterations-1)
+            adaptive(a,c,n,tolerance,remainingIterations-1,noOfProcesses)+adaptive(c,b,n,tolerance,remainingIterations-1,noOfProcesses)
         end
     end
 end
 
 #Simpson method which solves the integration in parallel#
+#This will return [{:result, val}, {:error, error}]. The result and the error value
 defmodule Simpson do
     def f(x) do
         (x*x*x*x - x*x + x*2)
@@ -110,7 +124,6 @@ defmodule Simpson do
         stepSize = 1.0*(b-a)/noOfProcesses
         error = findError(a, b)
         val = iteratorSP(a, n/noOfProcesses, stepSize, noOfProcesses)
-        #IO.puts "****** #{val} ********"
         ret = [{:result, val}, {:error, error}]
         ret
     end
@@ -129,7 +142,8 @@ defmodule Simpson do
     end
 end
 
-
-val = AdaptiveIntegration.adaptive(0, 10, 100000, 0.0001, 1000)
+# calls the method. 
+                                           # (a, b,  iterations, tolarence, maxIterations)
+val = AdaptiveIntegration.adaptiveIntegration(0, 10, 1600000,     0.0001,      1000      )
 IO.puts "final answer = #{val}"
 
